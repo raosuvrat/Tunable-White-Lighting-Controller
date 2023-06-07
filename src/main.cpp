@@ -5,7 +5,19 @@
 #include <ESP8266mDNS.h>
 #include <PubSubClient.h>
 
+#if __has_include("secrets.h")
 #include "secrets.h"
+#else
+#define WIFI_SSID "ssid"
+#define WIFI_PSK "password"
+#define MQTT_SERVER "10.0.0.10"
+#define MQTT_PORT 1883
+#define MQTT_USER "username"
+#define MQTT_PASS "password"
+#endif
+
+#define COOL_LIGHT_PIN D7
+#define WARM_LIGHT_PIN D8
 
 #define HOSTNAME "office_lights"
 
@@ -14,25 +26,23 @@
 #define MQTT_COMMAND_TOPIC "homeassistant/light/" HOSTNAME "/set"
 #define MQTT_BUFFER_SIZE JSON_OBJECT_SIZE(20)
 
-#define COOL_LIGHT_PIN D7
-#define WARM_LIGHT_PIN D8
 #define MIN_TEMP_K 2000
 #define MAX_TEMP_K 6535
 #define CONVERT_TEMP(t) (1000000 / t)
 
-void ota_setup(const char *hostname);
-void wifi_setup(const char *ssid, const char *pass, const char *hostname);
-void mqtt_callback(char *topic, byte *payload, unsigned int length);
+void ota_setup();
+void wifi_setup();
 void mqtt_setup();
 void mqtt_reconnect();
 void publish_state();
 void update_light();
+void mqtt_callback(char *topic, byte *payload, unsigned int length);
 
 WiFiClient wifi_client;
 PubSubClient mqtt_client(MQTT_SERVER, MQTT_PORT, mqtt_callback, wifi_client);
 
 bool state_on = true;
-int brightness = 255, temperature = (MIN_TEMP_K + 6535) / 2;
+int brightness = 255, temperature = (MIN_TEMP_K + MAX_TEMP_K) / 2;
 char buffer[MQTT_BUFFER_SIZE];
 StaticJsonDocument<MQTT_BUFFER_SIZE> doc;
 
@@ -41,8 +51,8 @@ void setup() {
   pinMode(D7, OUTPUT);
   pinMode(D8, OUTPUT);
 
-  wifi_setup(WIFI_SSID, WIFI_PSK, HOSTNAME);
-  ota_setup(HOSTNAME);
+  wifi_setup();
+  ota_setup();
   mqtt_setup();
 
   update_light();
@@ -58,17 +68,17 @@ void loop() {
   mqtt_client.loop();
 }
 
-void ota_setup(const char *hostname) {
-  ArduinoOTA.setHostname(hostname);
+void ota_setup() {
+  ArduinoOTA.setHostname(HOSTNAME);
   ArduinoOTA.onStart([]() { Serial.println("OTA Start"); });
   ArduinoOTA.onEnd([]() { Serial.println("\nOTA End"); });
   ArduinoOTA.begin();
   Serial.println("OTA ready");
 }
 
-void wifi_setup(const char *ssid, const char *pass, const char *hostname) {
-  Serial.printf("\nConnecting to %s\n", ssid);
-  WiFi.begin(ssid, pass);
+void wifi_setup() {
+  Serial.printf("\nConnecting to %s\n", WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PSK);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(200);
@@ -77,10 +87,10 @@ void wifi_setup(const char *ssid, const char *pass, const char *hostname) {
   Serial.printf("\nWiFi connected. IP address: %s\n",
                 WiFi.localIP().toString().c_str());
 
-  if (!MDNS.begin(hostname)) {
+  if (!MDNS.begin(HOSTNAME)) {
     Serial.println("MDNS responder failed to init");
   } else {
-    Serial.printf("mDNS responder OK. Name: %s\n", hostname);
+    Serial.printf("mDNS responder OK. Name: %s\n", HOSTNAME);
   }
 }
 
@@ -134,10 +144,12 @@ void update_light() {
     int coolness, warmness;
     if (temperature > (MIN_TEMP_K + MAX_TEMP_K) / 2) {
       coolness = 255;
-      warmness = map(temperature, (MIN_TEMP_K + MAX_TEMP_K) / 2, MAX_TEMP_K, 255, 0);
+      warmness =
+          map(temperature, (MIN_TEMP_K + MAX_TEMP_K) / 2, MAX_TEMP_K, 255, 0);
     } else {
       warmness = 255;
-      coolness = map(temperature, MIN_TEMP_K, (MIN_TEMP_K + MAX_TEMP_K) / 2, 0, 255);
+      coolness =
+          map(temperature, MIN_TEMP_K, (MIN_TEMP_K + MAX_TEMP_K) / 2, 0, 255);
     }
     analogWrite(COOL_LIGHT_PIN, 255 - coolness);
     analogWrite(WARM_LIGHT_PIN, 255 - warmness);
